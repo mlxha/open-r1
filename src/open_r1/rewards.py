@@ -68,6 +68,36 @@ def accuracy_reward(completions, solution, **kwargs):
 
     return rewards
 
+def mcq_accuracy_reward(completions, solution, **kwargs):
+    """Reward function for multiple choice questions with <answer> tag format."""
+    contents = [completion[0]["content"] for completion in completions]
+    rewards = []
+    
+    for content, sol in zip(contents, solution):
+        # Standardize solution format - strip whitespace
+        correct_answer = sol.strip()
+        
+        # Extract answer from completion using regex patterns
+        pattern1 = r"<answer>.*?The correct answer is ([A-D])\..*?</answer>"
+        pattern2 = r"<answer>.*?([A-D])[\.\s].*?</answer>"
+        pattern3 = r"<answer>.*?([A-D])[\s]*</answer>"
+        
+        for pattern in [pattern1, pattern2, pattern3]:
+            match = re.search(pattern, content, re.DOTALL)
+            if match:
+                # Extract the letter from the match
+                answer = match.group(1)
+                # Check if it matches the solution
+                reward = 1.0 if answer in correct_answer else 0.0
+                break
+        else:
+            # No properly formatted answer found
+            reward = 0.0
+            
+        rewards.append(reward)
+    
+    return rewards
+
 
 def format_reward(completions, **kwargs):
     """Reward function that checks if the reasoning process is enclosed within <think> and </think> tags, while the final answer is enclosed within <answer> and </answer> tags."""
@@ -507,6 +537,7 @@ async def run_script(sbx: AsyncSandbox, script: str, language: str) -> float:
 def get_reward_funcs(script_args) -> list[Callable]:
     REWARD_FUNCS_REGISTRY = {
         "accuracy": accuracy_reward,
+        "mcq_accuracy_reward": mcq_accuracy_reward,
         "format": format_reward,
         "reasoning_steps": reasoning_steps_reward,
         "cosine": get_cosine_scaled_reward(
