@@ -1,3 +1,18 @@
+# coding=utf-8
+# Copyright 2025 The HuggingFace Team. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Reward functions for GRPO training."""
 
 import asyncio
@@ -5,7 +20,7 @@ import json
 import math
 import re
 from functools import partial, update_wrapper
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 
 from latex2sympy2_extended import NormalizationConfig
 from math_verify import LatexExtractionConfig, parse, verify
@@ -23,7 +38,7 @@ else:
     AsyncSandbox = None
 
 
-def accuracy_reward(completions, solution, **kwargs):
+def accuracy_reward(completions: list[list[dict[str, str]]], solution: list[str], **kwargs) -> list[Optional[float]]:
     """Reward function that checks if the completion is the same as the ground truth."""
     contents = [completion[0]["content"] for completion in completions]
     rewards = []
@@ -31,7 +46,6 @@ def accuracy_reward(completions, solution, **kwargs):
         gold_parsed = parse(
             sol,
             extraction_mode="first_match",
-            extraction_config=[LatexExtractionConfig()],
         )
         if len(gold_parsed) != 0:
             # We require the answer to be provided in correct latex (no malformed operators)
@@ -54,15 +68,15 @@ def accuracy_reward(completions, solution, **kwargs):
                 ],
                 extraction_mode="first_match",
             )
-            # Reward 1 if the content is the same as the ground truth, 0 otherwise
+            # Compute binary rewards if verifiable, `None` otherwise to skip this example
             try:
-                reward = float(verify(answer_parsed, gold_parsed))
+                reward = float(verify(gold_parsed, answer_parsed))
             except Exception as e:
                 print(f"verify failed: {e}, answer: {answer_parsed}, gold: {gold_parsed}")
-                reward = 0.0
+                reward = None
         else:
-            # If the gold solution is not parseable, we reward 1 to skip this example
-            reward = 1.0
+            # If the gold solution is not parseable, we assign `None` to skip this example
+            reward = None
             print("Failed to parse gold solution: ", sol)
         rewards.append(reward)
 
@@ -398,13 +412,13 @@ def extract_code(completion: str, language: str = "python") -> str:
     return extracted_answer
 
 
-def binary_code_reward(completions, **kwargs) -> list[float]:
-    rewards = code_reward(completions, **kwargs)
+def binary_code_reward(completions, num_parallel: int = 2, **kwargs) -> list[float]:
+    rewards = code_reward(completions, num_parallel=num_parallel, **kwargs)
     BINARY_THRESHOLD = 0.99
     return [1.0 if reward > BINARY_THRESHOLD else 0.0 for reward in rewards]
 
 
-def code_reward(completions, **kwargs) -> list[float]:
+def code_reward(completions, num_parallel: int = 2, **kwargs) -> list[float]:
     """Reward function that evaluates code snippets using the E2B code interpreter.
 
     Assumes the dataset contains a `verification_info` column with test cases.
@@ -468,7 +482,7 @@ def code_reward(completions, **kwargs) -> list[float]:
     if not all(v["language"] == language for v in verification_info):
         raise ValueError("All verification_info must have the same language", verification_info)
     try:
-        rewards = run_async_from_sync(scripts, language)
+        rewards = run_async_from_sync(scripts, language, num_parallel)
 
     except Exception as e:
         print(f"Error from E2B executor: {e}")
@@ -493,12 +507,12 @@ def get_code_format_reward(language: str = "python"):
     return code_format_reward
 
 
-def run_async_from_sync(scripts: list[str], language: str) -> list[float]:
+def run_async_from_sync(scripts: list[str], language: str, num_parallel: int) -> list[float]:
     """Function wrapping the `run_async` function."""
     # Create a new event loop and set it
     try:
         # Run the async function and get the result
-        rewards = asyncio.run(run_async(scripts, language))
+        rewards = asyncio.run(run_async(scripts, language, num_parallel))
     except Exception as e:
         print(f"Error from E2B executor async: {e}")
         raise e
@@ -506,32 +520,49 @@ def run_async_from_sync(scripts: list[str], language: str) -> list[float]:
     return rewards
 
 
-async def run_async(scripts: list[str], language: str) -> list[float]:
-    # Create the sandbox by hand, currently there's no context manager for this version
-    sbx = await AsyncSandbox.create(timeout=30, request_timeout=3)
+async def run_async(scripts: list[str], language: str, num_parallel: int) -> list[float]:
+    # Limit the number of concurrent tasks
+    semaphore = asyncio.Semaphore(num_parallel)
 
     # Create a list of tasks for running scripts concurrently
-    tasks = [run_script(sbx, script, language) for script in scripts]
+    tasks = [run_script(script, language, semaphore) for script in scripts]
 
     # Wait for all tasks to complete and gather their results as they finish
     results = await asyncio.gather(*tasks)
     rewards = list(results)  # collect results
 
-    # Kill the sandbox after all the tasks are complete
-    await sbx.kill()
-
     return rewards
 
 
-async def run_script(sbx: AsyncSandbox, script: str, language: str) -> float:
-    execution = await sbx.run_code(script, language=language)
-    try:
-        return float(execution.text)
-    except (TypeError, ValueError):
-        return 0.0
-    except Exception as e:
-        print(f"Error from E2B executor run_script: {e}")
-        return 0.0
+async def run_script(script: str, language: str, semaphore: asyncio.Semaphore) -> float:
+    # We set a timeout margin, as the AsyncSandbox timeout does not seem to work
+    # These values are based on running 256 examples with the gold solution
+    # from open-r1/verifiable-coding-problems-python_decontaminated
+    # see scripts/benchmark_e2b.py
+
+    SANDBOX_TIMEOUT = 30
+    MARGIN = 2
+    REQUEST_TIMEOUT = SANDBOX_TIMEOUT - MARGIN
+    ASYNCIO_TIMEOUT = SANDBOX_TIMEOUT + MARGIN
+
+    async with semaphore:
+        try:
+            sandbox = await AsyncSandbox.create(timeout=SANDBOX_TIMEOUT, request_timeout=REQUEST_TIMEOUT)
+            execution = await asyncio.wait_for(sandbox.run_code(script, language=language), timeout=ASYNCIO_TIMEOUT)
+            return float(execution.text)
+        except (TypeError, ValueError):
+            return 0.0
+        except asyncio.TimeoutError:
+            print("Operation timed out")
+            return 0.0
+        except Exception as e:
+            print(f"Error in `run_script` from E2B sandbox ID {sandbox.sandbox_id} : {e}")
+            return 0.0
+        finally:
+            try:
+                await sandbox.kill()
+            except Exception as e:
+                print(f"Error from E2B executor kill with sandbox ID {sandbox.sandbox_id} : {e}")
 
 
 def get_reward_funcs(script_args) -> list[Callable]:
@@ -552,8 +583,12 @@ def get_reward_funcs(script_args) -> list[Callable]:
             max_penalty=script_args.repetition_max_penalty,
         ),
         "length": len_reward,
-        "code": code_reward,
-        "binary_code": binary_code_reward,
+        "code": update_wrapper(
+            partial(code_reward, num_parallel=script_args.parallel_code_exec_per_proc), code_reward
+        ),
+        "binary_code": update_wrapper(
+            partial(binary_code_reward, num_parallel=script_args.parallel_code_exec_per_proc), binary_code_reward
+        ),
         "ioi_code": update_wrapper(
             partial(ioi_code_reward, test_batch_size=script_args.code_eval_test_batch_size), ioi_code_reward
         ),
