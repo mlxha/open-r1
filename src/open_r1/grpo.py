@@ -30,11 +30,14 @@ from open_r1.utils.callbacks import get_callbacks
 from open_r1.utils.wandb_logging import init_wandb_training
 from trl import GRPOTrainer, ModelConfig, TrlParser, get_peft_config
 
-
 logger = logging.getLogger(__name__)
 
 
 def main(script_args, training_args, model_args):
+    from torch.serialization import add_safe_globals
+    from deepspeed.runtime.zero.config import ZeroStageEnum
+    add_safe_globals([ZeroStageEnum])
+
     # Set seed for reproducibility
     set_seed(training_args.seed)
 
