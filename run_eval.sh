@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-USERNAME="${LOGNAME}"
+USERNAME="${LOGNAME:-${USER:-$(whoami)}}"
 
 # Auto-detect available GPUs
 if command -v nvidia-smi &> /dev/null; then
