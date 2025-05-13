@@ -107,7 +107,10 @@ medqa_gen = LightevalTaskConfig(
     few_shots_split=None,
     few_shots_select=None,
     generation_size=8192,
-    metric=[gpqa_metric],
+    metric=[
+        Metrics.gpqa_instruct_pass_at_1_1n,
+        Metrics.gpqa_instruct_pass_at_1_4n,
+    ],
     stop_sequence=[],  # no stop sequence, will use eos token
     trust_dataset=True,
     version=1,
@@ -124,7 +127,10 @@ medmcqa_gen = LightevalTaskConfig(
     few_shots_split=None,
     few_shots_select=None,
     generation_size=8192,
-    metric=[gpqa_metric],
+    metric=[
+        Metrics.gpqa_instruct_pass_at_1_1n,
+        Metrics.gpqa_instruct_pass_at_1_4n,
+    ],
     stop_sequence=[],  # no stop sequence, will use eos token
     trust_dataset=True,
     version=1,
