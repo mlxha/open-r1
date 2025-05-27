@@ -99,7 +99,7 @@ def gpqa_prompt_fn(line, task_name: str = None):
 medqa_gen = LightevalTaskConfig(
     name="medqa_gen",
     suite=["custom"],
-    prompt_function=prompt.med_qa,
+    prompt_function=prompt.gpqa_instruct,
     hf_repo="bigbio/med_qa",
     hf_subset="med_qa_en_source",
     hf_avail_splits=["train", "test", "validation"],
@@ -113,13 +113,13 @@ medqa_gen = LightevalTaskConfig(
     ],
     stop_sequence=[],  # no stop sequence, will use eos token
     trust_dataset=True,
-    version=1,
+    version=2,
 )
 
 medmcqa_gen = LightevalTaskConfig(
     name="medmcqa_gen",
     suite=["custom"],
-    prompt_function=prompt.med_mcqa,
+    prompt_function=prompt.gpqa_instruct,
     hf_repo="lighteval/med_mcqa",
     hf_subset="default",
     hf_avail_splits=["train", "test", "validation"],
@@ -133,7 +133,7 @@ medmcqa_gen = LightevalTaskConfig(
     ],
     stop_sequence=[],  # no stop sequence, will use eos token
     trust_dataset=True,
-    version=1,
+    version=2,
 )
 
 pubmedqa = LightevalTaskConfig(
@@ -218,7 +218,7 @@ math_500 = LightevalTaskConfig(
 gpqa_diamond = LightevalTaskConfig(
     name="gpqa:diamond",
     suite=["custom"],
-    prompt_function=gpqa_prompt_fn,
+    prompt_function=prompt.gpqa_instruct,
     hf_repo="Idavidrein/gpqa",
     hf_subset="gpqa_diamond",
     hf_avail_splits=["train"],

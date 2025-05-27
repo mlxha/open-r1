@@ -34,6 +34,14 @@ from .utils.ioi import (
     score_subtask,
 )
 
+from lighteval.utils.language import Language
+from lighteval.metrics.dynamic_metrics import (
+    ExprExtractionConfig,
+    IndicesExtractionConfig,
+    LatexExtractionConfig,
+    multilingual_extractive_match_metric,
+)
+
 
 def accuracy_reward(completions: list[list[dict[str, str]]], solution: list[str], **kwargs) -> list[Optional[float]]:
     """Reward function that checks if the completion is the same as the ground truth."""
@@ -109,10 +117,46 @@ def mcq_accuracy_reward(completions, solution, **kwargs):
     
     return rewards
 
+def mcq_accuracy_reward_v2(completions, solution, **kwargs):
+    """Reward function for multiple choice questions with <answer> tag format using lighteval's extraction method."""
+    contents = [completion[0]["content"] for completion in completions]
+    rewards = []
+    
+    # Configure the extractive match metric
+    gpqa_metric = multilingual_extractive_match_metric(
+        language=Language.ENGLISH,
+        gold_extraction_target=[IndicesExtractionConfig(prefix_for_extraction="NativeLetters")],
+        pred_extraction_target=[IndicesExtractionConfig(prefix_for_extraction="NativeLetters")],
+        precision=5,
+    )
+    
+    for content, sol in zip(contents, solution):
+        # Extract the answer part from the completion
+        answer_part = ""
+        answer_match = re.search(r"<answer>(.*?)</answer>", content, re.DOTALL)
+        if answer_match:
+            answer_part = answer_match.group(1)
+        else:
+            # No properly formatted answer found
+            rewards.append(0.0)
+            continue
+            
+        # Use lighteval's extraction to compare prediction with solution
+        # The metric returns scores between 0 and 1
+        try:
+            score = gpqa_metric.compute_one_item(gold=sol, pred=answer_part)
+            reward = float(score)
+        except Exception as e:
+            print(f"Error in extraction: {e}")
+            reward = 0.0
+            
+        rewards.append(reward)
+    
+    return rewards
 
 def format_reward(completions, **kwargs):
     """Reward function that checks if the reasoning process is enclosed within <think> and </think> tags, while the final answer is enclosed within <answer> and </answer> tags."""
-    pattern = r"^<think>\n.*?\n</think>\n<answer>\n.*?\n</answer>$"
+    pattern = r"^<think>\n.*?\n</think>\n.*?<answer>\n.*?\n</answer>$"
     completion_contents = [completion[0]["content"] for completion in completions]
     matches = [re.match(pattern, content, re.DOTALL | re.MULTILINE) for content in completion_contents]
     return [1.0 if match else 0.0 for match in matches]
@@ -134,7 +178,17 @@ def tag_count_reward(completions, **kwargs) -> list[float]:
             count += 0.25
         if text.count("\n</answer>") == 1:
             count += 0.25
-        return count
+        
+        if text.count("<think>") > 1:
+            count -= 0.25
+        if text.count("</think>") > 1:
+            count -= 0.25
+        if text.count("<answer>") > 1:
+            count -= 0.25
+        if text.count("</answer>") > 1:
+            count -= 0.25
+
+        return max(0.0, count)
 
     contents = [completion[0]["content"] for completion in completions]
     return [count_tags(c) for c in contents]
@@ -608,6 +662,7 @@ def get_reward_funcs(script_args) -> list[Callable]:
     REWARD_FUNCS_REGISTRY = {
         "accuracy": accuracy_reward,
         "mcq_accuracy": mcq_accuracy_reward,
+        "mcq_accuracy_v2": mcq_accuracy_reward_v2,
         "format": format_reward,
         "reasoning_steps": reasoning_steps_reward,
         "cosine": get_cosine_scaled_reward(
