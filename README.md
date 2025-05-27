@@ -42,6 +42,7 @@ We will use the DeepSeek-R1 [tech report](https://github.com/deepseek-ai/DeepSee
 
 ## News 🗞️
 
+* **🧑‍🍳 [2025/05/26] (Step 1 completed!)** We release [**Mixture-of-Thoughts**](https://huggingface.co/datasets/open-r1/Mixture-of-Thoughts)--a curated reasoning dataset of 350k verified traces distilled from R1. The dataset spans tasks in mathematics, coding, and science, and is designed to teach language models to reason step-by-step. We also provide a recipe to train [OpenR1-Distill-7B](https://huggingface.co/open-r1/OpenR1-Distill-7B), which replicates the reasoning capabilities of [deepseek-ai/DeepSeek-R1-Distill-Qwen-7B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B) and marks the completion of step 1 in the Open R1 project.
 * **⚡️ [2025/03/11] [(update #3)](https://huggingface.co/blog/open-r1/update-3):** We release the [**CodeForces-CoTs**](https://huggingface.co/datasets/open-r1/codeforces-cots) dataset of 10k competitive programming problems and 100k solutions distilled from R1. We also release IOI24: a new benchmark of _very_ hard problems from international olympiads. A 7B Qwen model trained on CodeForces-CoTs can outperform Claude 3.7 Sonnet on IOI24, while a 32B model can outperform R1 itself.
 * **∞ [2025/02/10] [(update #2)](https://huggingface.co/blog/open-r1/update-2):** We release the [**OpenR1-Math-220k**](https://huggingface.co/datasets/open-r1/OpenR1-Math-220k) dataset of 220k traces distilled from R1 on a new version of NuminaMath. Models trained on this dataset match the performance of DeepSeek's distilled ones.
 * **🔥 [2025/02/02] [(update #1)](https://huggingface.co/blog/open-r1/update-1):** We implement the first parts of the [training](https://github.com/huggingface/open-r1?tab=readme-ov-file#training-models), [inference](https://github.com/huggingface/open-r1?tab=readme-ov-file#data-generation), and [evaluation](https://github.com/huggingface/open-r1?tab=readme-ov-file#reproducing-deepseeks-evaluation-results) pipelines. Let's go!  
@@ -103,14 +104,15 @@ sudo apt-get install git-lfs
 > [!NOTE]
 > The training commands below are configured for a node of 8 x H100s (80GB). For different hardware and topologies, you may need to tune the batch size and number of gradient accumulation steps.
 
-We support training models with either DDP or DeepSpeed (ZeRO-2 and ZeRO-3). For example, to run SFT on a dataset distilled from DeepSeek-R1 with reasoning traces such as [open-r1/OpenR1-Math-220k](https://huggingface.co/datasets/open-r1/OpenR1-Math-220k), run:
+We support training models with either DDP or DeepSpeed (ZeRO-2 and ZeRO-3). For example, to run SFT on a dataset distilled from DeepSeek-R1 with reasoning traces such as [open-r1/Mixture-of-Thoughts](https://huggingface.co/datasets/open-r1/Mixture-of-Thoughts), run:
 
 ```shell
 # Train via command line
 accelerate launch --config_file=recipes/accelerate_configs/zero3.yaml src/open_r1/sft.py \
     --model_name_or_path Qwen/Qwen2.5-1.5B-Instruct \
-    --dataset_name open-r1/OpenR1-Math-220k \
-    --learning_rate 5.0e-5 \
+    --dataset_name open-r1/Mixture-of-Thoughts \
+    --dataset_config all \
+    --learning_rate 4.0e-5 \
     --num_train_epochs 1 \
     --max_seq_length 16384 \
     --per_device_train_batch_size 16 \
@@ -158,10 +160,11 @@ Most base models like `meta-llama/Llama-3.2-1B` do not have a chat template, so 
 accelerate launch --config_file=recipes/accelerate_configs/zero3.yaml src/open_r1/sft.py \
     --model_name_or_path Qwen/Qwen2.5-1.5B \
 +   --eos_token '<|im_end|>'
-    --dataset_name open-r1/OpenR1-Math-220k \
-    --learning_rate 5.0e-5 \
+    --dataset_name open-r1/Mixture-of-Thoughts \
+    --dataset_config all \
+    --learning_rate 4.0e-5 \
     --num_train_epochs 1 \
-    --max_seq_length 16384 \
+    --max_seq_length 32768 \
     --per_device_train_batch_size 16 \
     --gradient_checkpointing \
     --bf16 \
@@ -177,10 +180,11 @@ accelerate launch --config_file=recipes/accelerate_configs/zero3.yaml src/open_r
     --model_name_or_path meta-llama/Llama-3.2-1B \
 +   --chat_template "$(cat llama_chat_template.jinja)" \
 +   --eos_token '<|eot_id|>' \
-    --dataset_name open-r1/OpenR1-Math-220k \
-    --learning_rate 5.0e-5 \
+    --dataset_name open-r1/Mixture-of-Thoughts \
+    --dataset_config all \
+    --learning_rate 4.0e-5 \
     --num_train_epochs 1 \
-    --max_seq_length 16384 \
+    --max_seq_length 32768 \
     --per_device_train_batch_size 16 \
     --gradient_checkpointing \
     --bf16 \
@@ -190,12 +194,12 @@ accelerate launch --config_file=recipes/accelerate_configs/zero3.yaml src/open_r
 
 ### SFT
 
-To run SFT on a dataset distilled from DeepSeek-R1 with reasoning traces such as [open-r1/OpenR1-Math-220k](https://huggingface.co/datasets/open-r1/OpenR1-Math-220k), run:
+To run SFT on a dataset distilled from DeepSeek-R1 with reasoning traces such as [open-r1/Mixture-of-Thoughts](https://huggingface.co/datasets/open-r1/Mixture-of-Thoughts), run:
 
 ```shell
 ACCELERATE_LOG_LEVEL=info accelerate launch --config_file recipes/accelerate_configs/zero3.yaml \
     src/open_r1/sft.py \
-    --config recipes/Qwen2.5-1.5B-Instruct/sft/config_demo.yaml
+    --config recipes/OpenR1-Distill-7B/sft/config_distill.yaml
 ```
 
 ### GRPO
@@ -245,7 +249,8 @@ sbatch --nodes=2 slurm/train.slurm --model Qwen2.5-1.5B-Instruct --task grpo --c
 
 See the [Launching jobs on a Slurm cluster](#launching-jobs-on-a-slurm-cluster) section for more details.
 
-### GRPO dataset filtering
+#### GRPO dataset filtering
+
 We provide support to filter datasets by generating and computing pass rate on veriable tasks, see this [README](scripts/pass_rate_filtering/README.md)
 
 #### 👨‍💻 Training with a code interpreter
@@ -349,16 +354,31 @@ morph_router_url: 1.2.3.4:8000
 The port should match the one used when launching the router.
 All training jobs can share the same router IP which will ensure parallel executions are properly managed.
 
-#### IOI problems
+#### Competitive Programming problems: IOI & CodeForces
 
-We provide a `ioi_code_reward` reward function for executing problems from [IOI](https://hf.co/datasets/open-r1/ioi). You can use either [piston](https://github.com/engineer-man/piston) or Morph as your execution provider.
+We provide `ioi_code_reward` and `cf_code_reward` reward functions for executing problems from [IOI](https://hf.co/datasets/open-r1/ioi) and [CodeForces](https://huggingface.co/datasets/open-r1/codeforces), respectively. You can use either [piston](https://github.com/engineer-man/piston) or Morph (currently IOI only) as your execution provider.
 
 ##### Piston 
 
 To use Piston:
 1. Get piston workers running, see [slurm/piston/README.md](./slurm/piston/README.md)
 2. Set your environment variable `PISTON_ENDPOINTS` to `slurm` or to a list of piston worker endpoints
+
+For IOI:
+
 3. In your configuration, use `ioi_provider: "piston"`
+
+For CodeForces:
+
+3. Download the generated (hard) test cases:
+```
+# change PATH_TO_SAVE_TESTCASES. Increase --max-workers according to your machine's capacity
+huggingface-cli download open-r1/codeforces --repo-type=dataset --include='generated_tests/*.parquet' --max-workers=8 --local-dir PATH_TO_SAVE_TESTCASES 
+```
+4. Save the path in .env:
+```
+CF_TESTS_FOLDER=PATH_TO_SAVE_TESTCASES
+```
 
 ##### Morph 
 
@@ -367,12 +387,21 @@ Morph is a cloud-based solution that provides sandboxed environments for running
 2. Add your Morph API key to the `.env` file: `MORPH_API_KEY="your_key_here"`
 3. In your configuration, use `ioi_provider: "morph"`
 
-See the [example recipe](./recipes/Qwen2.5-1.5B-Instruct/grpo/config_demo_code_ioi.yaml) for how to use the reward function:
+##### Example recipes
+For IOI:
+
+See the [example recipe](./recipes/Qwen2.5-1.5B-Instruct/grpo/config_demo_code_ioi.yaml) for how to use the IOI reward function:
 
 ```shell
 ACCELERATE_LOG_LEVEL=info accelerate launch --config_file recipes/accelerate_configs/zero2.yaml \
     --num_processes=7 src/open_r1/grpo.py \
     --config recipes/Qwen2.5-1.5B-Instruct/grpo/config_demo_code_ioi.yaml
+```
+
+For CodeForces:
+
+```shell
+sbatch --job-name=cf-grpo --nodes=2 slurm/train.slurm --model Qwen2.5-Coder-7B-Instruct --task grpo --config codeforces --accelerator zero3 --dp 8 --tp 1
 ```
 
 ### Launching jobs on a Slurm cluster
@@ -399,6 +428,31 @@ sbatch --job-name=open_r1 --nodes=2 slurm/train.slurm --model Qwen2.5-1.5B-Instr
 
 > [!NOTE]
 > The configuration in `slurm/train.slurm` is optimised for the Hugging Face Compute Cluster and may require tweaking to be adapted to your own compute nodes.
+
+### Customising the dataset mixture
+
+To combine multiple datasets as a single training mixture, you can specify the `dataset_mixture` parameter in the YAML config file. Here's a template for how to do this:
+
+```yaml
+dataset_mixture:
+  datasets:                     # List of datasets to include in the mixture
+    - id: dataset_1             # Hub dataset ID
+      config: config_name_1     # Name of the dataset config
+      split: split_1            # Split to use from the dataset
+      columns:                  # Columns to keep
+        - column_1              
+        - column_2    
+      weight: 0.25              # Fraction of dataset to use
+    - id: dataset_2
+      config: config_name_2
+      split: split_2
+      columns:                  
+        - column_1              
+        - column_2   
+      weight: 0.5
+  seed: 42                      # Seed for shuffling the combined dataset
+  test_split_size: 0.1          # Fraction of mixture to use for a test split
+```
 
 ## Evaluating models
 
@@ -713,7 +767,7 @@ sbatch slurm/generate.slurm \
 
 ### Data decontamination
 
-Following [s1: Simple test-time scaling](https://arxiv.org/abs/2501.19393) the data can be decontaminated using the script at: [scripts/decontaminate.py](./scripts/decontaminate.py), which decontaminates a dataset using 8-grams and deduplicate the data. Sample run:
+Following [s1: Simple test-time scaling](https://huggingface.co/papers/2501.19393) the data can be decontaminated using the script at: [scripts/decontaminate.py](./scripts/decontaminate.py), which decontaminates a dataset using 8-grams and deduplicate the data. Sample run:
 
 ```shell
 python scripts/decontaminate.py \
