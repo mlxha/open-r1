@@ -92,14 +92,51 @@ def gpqa_prompt_fn(line, task_name: str = None):
         instruction=query,
     )
 
+def medqa_gen_prompt_fn(line, task_name: str = None):
+    """Custom prompt function for MedQA generative evaluation with thinking template"""
+    query_template = "Answer the following multiple choice question. The last line of your response should be of the following format: 'Answer: $LETTER' (without quotes) where LETTER is one of ABCD. Think step by step before answering.\n\nQuestion: {question}\n\n{options}\n"
+    
+    # Format the options from MedQA structure
+    options_text = "".join([f"{option['key']}) {option['value']}\n" for option in line["options"]])
+    
+    query = query_template.format(
+        question=line['question'],
+        options=options_text.strip()
+    )
+    
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=[opt["key"] for opt in line["options"]],
+        gold_index=[opt["key"] for opt in line["options"]].index(line["answer_idx"]),
+        instruction=query,
+    )
 
-
+def medmcqa_instruct_prompt_fn(line, task_name: str = None):
+    """Custom prompt function for MedMCQA generative evaluation with thinking template"""
+    query_template = "Answer the following multiple choice question. The last line of your response should be of the following format: 'Answer: $LETTER' (without quotes) where LETTER is one of ABCD. Think step by step before answering.\n\nQuestion: {question}\n\nA) {opa}\nB) {opb}\nC) {opc}\nD) {opd}\n"
+    
+    query = query_template.format(
+        question=line['question'],
+        opa=line['opa'],
+        opb=line['opb'],
+        opc=line['opc'],
+        opd=line['opd']
+    )
+    
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=["A", "B", "C", "D"],
+        gold_index=line["cop"] - 1,  # cop is 1-indexed, convert to 0-indexed
+        instruction=query,
+    )
 
 # Define tasks
 medqa_gen = LightevalTaskConfig(
     name="medqa_gen",
     suite=["custom"],
-    prompt_function=prompt.gpqa_instruct,
+    prompt_function=medqa_gen_prompt_fn,
     hf_repo="bigbio/med_qa",
     hf_subset="med_qa_en_source",
     hf_avail_splits=["train", "test", "validation"],
@@ -119,7 +156,7 @@ medqa_gen = LightevalTaskConfig(
 medmcqa_gen = LightevalTaskConfig(
     name="medmcqa_gen",
     suite=["custom"],
-    prompt_function=prompt.gpqa_instruct,
+    prompt_function=medmcqa_instruct_prompt_fn,
     hf_repo="lighteval/med_mcqa",
     hf_subset="default",
     hf_avail_splits=["train", "test", "validation"],
