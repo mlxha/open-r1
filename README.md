@@ -21,10 +21,9 @@
 The goal of this repo is to build the missing pieces of the R1 pipeline such that everybody can reproduce and build on top of it. The project is simple by design and mostly consists of:
 
 
-- `src/open_r1`: contains the scripts to train and evaluate models as well as generate synthetic data:
+- `src/open_r1`: contains the scripts to train models as well as generate synthetic data:
     - `grpo.py`: trains a model with GRPO on a given dataset.
     - `sft.py`: performs a simple SFT of a model on a dataset.
-    - `evaluate.py`: evaluates a model on the R1 benchmarks.
     - `generate.py`: generates synthetic data from a model using [Distilabel](https://github.com/argilla-io/distilabel).
 - `Makefile`: contains easy-to-run commands for each step in the R1 pipeline leveraging the scripts above.
 
@@ -70,7 +69,7 @@ uv venv openr1 --python 3.11 && source openr1/bin/activate && uv pip install --u
 Next, install vLLM and FlashAttention:
 
 ```shell
-uv pip install vllm==0.8.4
+uv pip install vllm==0.8.5.post1
 uv pip install setuptools && uv pip install flash-attn --no-build-isolation
 ```
 
@@ -104,26 +103,27 @@ sudo apt-get install git-lfs
 > [!NOTE]
 > The training commands below are configured for a node of 8 x H100s (80GB). For different hardware and topologies, you may need to tune the batch size and number of gradient accumulation steps.
 
-We support training models with either DDP or DeepSpeed (ZeRO-2 and ZeRO-3). For example, to run SFT on a dataset distilled from DeepSeek-R1 with reasoning traces such as [open-r1/Mixture-of-Thoughts](https://huggingface.co/datasets/open-r1/Mixture-of-Thoughts), run:
+We support training models with either DDP or DeepSpeed (ZeRO-2 and ZeRO-3). For example, to perform SFT on a dataset distilled from DeepSeek-R1 with reasoning traces such as [open-r1/Mixture-of-Thoughts](https://huggingface.co/datasets/open-r1/Mixture-of-Thoughts), run:
 
 ```shell
 # Train via command line
 accelerate launch --config_file=recipes/accelerate_configs/zero3.yaml src/open_r1/sft.py \
-    --model_name_or_path Qwen/Qwen2.5-1.5B-Instruct \
+    --model_name_or_path open-r1/Qwen2.5-Math-7B-RoPE-300k \
     --dataset_name open-r1/Mixture-of-Thoughts \
     --dataset_config all \
+    --eos_token '<|im_end|>' \
     --learning_rate 4.0e-5 \
-    --num_train_epochs 1 \
-    --max_seq_length 16384 \
-    --per_device_train_batch_size 16 \
+    --num_train_epochs 5 \
+    --max_seq_length 32768 \
+    --per_device_train_batch_size 2 \
     --gradient_checkpointing \
     --bf16 \
     --use_liger_kernel \
-    --output_dir data/Qwen2.5-1.5B-Open-R1-Distill
+    --output_dir data/OpenR1-Distill-7B
 
 # Train via YAML config
 accelerate launch --config_file recipes/accelerate_configs/zero3.yaml src/open_r1/sft.py \
-    --config recipes/Qwen2.5-1.5B-Instruct/sft/config_demo.yaml
+    --config recipes/OpenR1-Distill-7B/sft/config_distill.yaml
 ```
 
 Currently, the following tasks are supported:
@@ -137,17 +137,19 @@ Currently, the following tasks are supported:
 By default, these scripts will push each model to your Hugging Face Hub username, i.e. `{username}/{model_name}-{task}`. You can override the parameters in each YAML config by appending them to the command as follows: 
 
 ```shell
-# Change batch size, number of epochs etc
+# Change the base model to a smaller variant
 accelerate launch --config_file recipes/accelerate_configs/zero3.yaml src/open_r1/sft.py \
-    --config recipes/Qwen2.5-1.5B-Instruct/sft/config_demo.yaml
-    --per_device_train_batch_size=1 --num_train_epochs=5
+    --config recipes/OpenR1-Distill-7B/sft/config_distill.yaml \
+    --model_name_or_path Qwen/Qwen3-0.6B-Base \
+    --hub_model_id OpenR1-Distill-0.6B \
+    --output_dir data/OpenR1-Distill-0.6B
 ```
 
 If you also wish to override the Weights and Biases default settings, you can do so as follows:
 
 ```shell
 accelerate launch --config_file recipes/accelerate_configs/zero3.yaml src/open_r1/sft.py \
-    --config recipes/Qwen2.5-1.5B-Instruct/sft/config_demo.yaml
+    --config recipes/OpenR1-Distill-7B/sft/config_distill.yaml
     --wandb_entity huggingface --wandb_project open-r1 --run_name Qwen2.5-1.5B-GRPO
 ```
 
@@ -192,9 +194,9 @@ accelerate launch --config_file=recipes/accelerate_configs/zero3.yaml src/open_r
     --output_dir data/Llama-3.2-1B-Open-R1-Distill
 ```
 
-### SFT
+### SFT distillation
 
-To run SFT on a dataset distilled from DeepSeek-R1 with reasoning traces such as [open-r1/Mixture-of-Thoughts](https://huggingface.co/datasets/open-r1/Mixture-of-Thoughts), run:
+We provide a recipe to reproduce the reasoning capabilities of [deepseek-ai/DeepSeek-R1-Distill-Qwen-7B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B), starting from the same base model. To do so, run:
 
 ```shell
 ACCELERATE_LOG_LEVEL=info accelerate launch --config_file recipes/accelerate_configs/zero3.yaml \
@@ -202,44 +204,28 @@ ACCELERATE_LOG_LEVEL=info accelerate launch --config_file recipes/accelerate_con
     --config recipes/OpenR1-Distill-7B/sft/config_distill.yaml
 ```
 
+The result will be a model like [open-r1/OpenR1-Distill-7B](https://huggingface.co/open-r1/OpenR1-Distill-7B), with the following downstream performance:
+
+| Model                       | AIME 2024 | MATH-500 | GPQA Diamond | LiveCodeBench v5 |
+|-----------------------------|-----------|----------|--------------|------------------|
+| OpenR1-Distill-7B           | 52.7      | 89.0     | 52.8         | 39.4             |
+| DeepSeek-R1-Distill-Qwen-7B | 51.3      | 93.5     | 52.4         | 37.4             |
+
+You can adjust the YAML config to train on a different base model or dataset.
+
 ### GRPO
 
-We use TRL's [vLLM backend](https://huggingface.co/docs/trl/speeding_up_training?vllm+examples=GRPO#vllm-for-fast-generation-in-online-methods) to scale training to large models across multiple nodes. For single-node training of smol models across 8 GPUs, first spin up the vLLM server to run on e.g. 1 GPU as follows:
+We use TRL's [vLLM backend](https://huggingface.co/docs/trl/speeding_up_training?vllm+examples=GRPO#vllm-for-fast-generation-in-online-methods) to scale training to large models across multiple nodes. For single-node training of smol models across 8 GPUs, use `vllm_mode="colocate"` to run vLLM in the same process as the training script:
 
 ```shell
-CUDA_VISIBLE_DEVICES=0 trl vllm-serve --model deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
-```
-
-Once the server is up, run training on the remaining GPUs as follows:
-
-```shell
-CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7 ACCELERATE_LOG_LEVEL=info \
-    accelerate launch --config_file recipes/accelerate_configs/zero2.yaml --num_processes 7 \
-    src/open_r1/grpo.py --config recipes/DeepSeek-R1-Distill-Qwen-1.5B/grpo/config_demo.yaml
+ACCELERATE_LOG_LEVEL=info \
+    accelerate launch --config_file recipes/accelerate_configs/zero3.yaml \
+    src/open_r1/grpo.py --config recipes/DeepSeek-R1-Distill-Qwen-1.5B/grpo/config_demo.yaml \
+    --vllm_mode colocate
 ```
 
 > [!WARNING]
 > The chat template used in the distilled DeepSeek models omits the contents of the reasoning block within the `<think>` and `</think>` tags. It also prefills the assistant response with `<think>` which interferes with the format reward function. To handle that, it is important to override the chat template as done in e.g.  [recipes/DeepSeek-R1-Distill-Qwen-1.5B/grpo/config_demo.yaml](./recipes/DeepSeek-R1-Distill-Qwen-1.5B/grpo/config_demo.yaml).
-
-To increase the throughput with data parallel on e.g. 2 GPUs, run:
-
-```shell
-CUDA_VISIBLE_DEVICES=0,1 trl vllm-serve --model deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B --data_parallel_size 2
-```
-
-Then run training on the remaining GPUs as follows:
-
-```shell
-CUDA_VISIBLE_DEVICES=2,3,4,5,6,7 ACCELERATE_LOG_LEVEL=info \
-    accelerate launch --config_file recipes/accelerate_configs/zero2.yaml --num_processes 6 \
-    src/open_r1/grpo.py --config recipes/DeepSeek-R1-Distill-Qwen-1.5B/grpo/config_demo.yaml
-```
-
-For larger models, use tensor parallelism:
-
-```shell
-CUDA_VISIBLE_DEVICES=0,1 trl vllm-serve --model deepseek-ai/DeepSeek-R1-Distill-Qwen-14B --tensor_parallel_size 2
-``` 
 
 For multi-node training on N+1 nodes, with 1 node running the vLLM server and N nodes running training, we provide an example Slurm script. For example, to run the above example on 1+1 nodes with data parallelism, run:
 
@@ -415,7 +401,7 @@ sbatch --job-name=open_r1 --nodes=1 slurm/train.slurm --model {model_name} --tas
 Here `{model_name}` and `{task}` are defined as above, while `{config_suffix}` refers to the specific config and `{accelerator}` refers to the choice of 🤗 Accelerate config in `recipes/accelerate_configs`. If you wish to override the default config parameters, you can provide them by appending a space-separated string like `'--arg1=value1 --arg2=value2'`. Here's a concrete example to run SFT on 1 node of 8 GPUs:
 
 ```shell
-sbatch --job-name=open_r1 --nodes=1 slurm/train.slurm --model Qwen2.5-1.5B-Instruct --task sft --config demo --accelerator zero3
+sbatch --job-name=open_r1 --nodes=1 slurm/train.slurm --model OpenR1-Distill-7B --task sft --config distill --accelerator zero3
 ```
 
 You can scale the number of nodes by increasing the `--nodes` flag.
