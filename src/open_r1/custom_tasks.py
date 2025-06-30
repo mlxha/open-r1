@@ -132,6 +132,26 @@ def medmcqa_instruct_prompt_fn(line, task_name: str = None):
         instruction=query,
     )
 
+def medxpertqa_prompt_fn(line, task_name: str = None):
+    """Custom prompt function for MedXpertQA evaluation with thinking template"""
+    query_template = "Answer the following multiple choice question. The last line of your response should be of the following format: 'Answer: $LETTER' (without quotes) where LETTER is one of ABCDEFGHIJ. Think step by step before answering.\n\n{question}"
+    
+    query = query_template.format(question=line['question'])
+    
+    # Extract all possible choice letters from the options
+    choices = list(line["options"].keys())  # Should be ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
+    
+    # Find the index of the correct answer
+    gold_index = choices.index(line["label"])
+    
+    return Doc(
+        task_name=task_name,
+        query=query,
+        choices=choices,
+        gold_index=gold_index,
+        instruction=query,
+    )
+
 # Define tasks
 medqa_gen = LightevalTaskConfig(
     name="medqa_gen",
@@ -161,6 +181,26 @@ medmcqa_gen = LightevalTaskConfig(
     hf_subset="default",
     hf_avail_splits=["train", "test", "validation"],
     evaluation_splits=["validation"],
+    few_shots_split=None,
+    few_shots_select=None,
+    generation_size=8192,
+    metric=[
+        Metrics.gpqa_instruct_pass_at_1_1n,
+        Metrics.gpqa_instruct_pass_at_1_4n,
+    ],
+    stop_sequence=[],  # no stop sequence, will use eos token
+    trust_dataset=True,
+    version=2,
+)
+
+medxpertqa_gen = LightevalTaskConfig(
+    name="medxpertqa_gen",
+    suite=["custom"],
+    prompt_function=medxpertqa_prompt_fn,
+    hf_repo="lighteval/MedXpertQA",  # Update this to the correct repo
+    hf_subset="Text",
+    hf_avail_splits=["dev", "test"],
+    evaluation_splits=["test"],
     few_shots_split=None,
     few_shots_select=None,
     generation_size=8192,
@@ -274,6 +314,7 @@ gpqa_diamond = LightevalTaskConfig(
 TASKS_TABLE = []
 TASKS_TABLE.append(medqa_gen)
 TASKS_TABLE.append(medmcqa_gen)
+TASKS_TABLE.append(medxpertqa_gen)
 TASKS_TABLE.append(pubmedqa)
 TASKS_TABLE.append(medmcqa)
 TASKS_TABLE.append(medqa)
